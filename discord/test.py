@@ -826,4 +826,4 @@ async def 반갑다(ctx):
 
 
 
-bot.run("MTAxODc2MjYzMjMxMzk3NDc5NA.GPUBHd.bDsMy_l6GYcHUOgEzQ_Y-yWkTW4Y5hUiSK-J_M")
+bot.run(token)
