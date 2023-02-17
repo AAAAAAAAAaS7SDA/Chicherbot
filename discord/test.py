@@ -2,17 +2,189 @@ import asyncio, discord
 from discord.ext import commands
 import  datetime, pytz
 import random
-import time , os
+import time
+from discord.ui import View, Select
+from youtube_dl import YoutubeDL
+import bs4
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from discord.utils import get
+from discord import FFmpegPCMAudio
+from urllib import request
 from discord.ui import Button, View
+from discord.utils import get
+from webdriver import keep_alive
 
 mod = 15
 msg = ''
 
+
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix='!', intents=intents)
+client = discord.Client(intents=intents)
 
-startup_extensions = ['Cogs.Message']
-os.chdir('Cogs')
+user = []
+musictitle = []
+musicnow = []
+song_queue = []
+
+userF = []
+userFlist = []
+allplaulist = []
+
+number = 1
+
+def title(msg):
+    global music
+
+    YDL_OPTIONS = {'format': 'bestaudio', 'noplaylist':'True'}
+    FFMPEG_OPTIONS = {'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5', 'options': '-vn'}
+
+    options = webdriver.ChromeOptions()
+    options.add_argument("headless")
+
+    chromedriver_dir = r"D:\Discord_Bot\chromedriver.exe"
+    driver = webdriver.Chrome(chromedriver_dir, options = options)
+    driver.get("https://www.youtube.com/results?search_query="+msg+"+lyrics")
+    source = driver.page_source
+    bs = bs4.BeautifulSoup(source, 'lxml')
+    entire = bs.find_all('a', {'id': 'video-title'})
+    entireNum = entire[0]
+    music = entireNum.text.strip()
+    
+    musictitle.append(music)
+    musicnow.append(music)
+    test1 = entireNum.get('href')
+    url = 'https://www.youtube.com'+test1
+    with YoutubeDL(YDL_OPTIONS) as ydl:
+            info = ydl.extract_info(url, download=False)
+    URL = info['formats'][0]['url']
+
+    driver.quit()
+    
+    return music, URL
+
+def URLPLAY(url):
+    YDL_OPTIONS = {'format': 'bestaudio','noplaylist':'True'}
+    FFMPEG_OPTIONS = {'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5', 'options': '-vn'}
+
+    if not vc.is_playing():
+        with YoutubeDL(YDL_OPTIONS) as ydl:
+            info = ydl.extract_info(url, download=False)
+        URL = info['formats'][0]['url']
+        vc.play(FFmpegPCMAudio(URL, **FFMPEG_OPTIONS))
+        client.loop.create_task(subtitle_song(ctx, URL))
+
+async def subtitle_song(ctx, suburl):
+    TEXT = suburl
+    rink = TEXT[-11:]
+    target = request.urlopen("http://video.google.com/timedtext?type=list&v="+rink)
+
+    soup = bs4.BeautifulSoup(target, "html.parser")
+    sub = 0
+    kor = 0
+    for track in soup.select("track"):
+        if sub == 0:
+            firstsub = track['lang_code']
+        if track['lang_code'] == 'ko':
+            kor += 1
+        sub += 1
+
+    if sub == 0: #자막이 없음
+        await ctx.send("""
+        ```
+        유튜브 자막이 포함되지 않은 영상입니다!
+        ```
+        """)
+        return 0
+
+    elif kor == 0 and sub != 0: #한글이 아닌 자막 재생
+        target = request.urlopen("http://video.google.com/timedtext?lang="+firstsub+"&v="+rink)
+        
+    elif kor == 1 and sub != 0:  #한글 자막 재생
+        target = request.urlopen("http://video.google.com/timedtext?lang=ko&v="+rink)
+
+    soup = bs4.BeautifulSoup(target, "html.parser")
+    subtimedur = []
+    subtimelast = []
+    last_time = 0
+    subtext = []
+
+    for text in soup.select("text"):
+        subtimedur.append(text['start'])
+        subtimelast.append(text['dur'])
+        subtext.append(text.string)
+    
+    for i in range(len(subtext)):
+        last_time += 1
+        embed = discord.Embed(description=subtext[i], color=0x00ff00)
+        if i == 0:
+            time.sleep(float(subtimedur[i]))
+            sub_message = await ctx.send(embed = embed)
+        else:
+            time.sleep(float(subtimedur[i]) - float(subtimedur[i-1]) - float(0.1))
+            await sub_message.edit(embed = embed)
+        
+    time.sleep(subtimelast[last_time])
+
+    await sub_message.delete()
+    del subtimedur [:]
+    del subtext [:]
+
+def play(ctx):
+    global vc
+    YDL_OPTIONS = {'format': 'bestaudio', 'noplaylist':'True'}
+    FFMPEG_OPTIONS = {'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5', 'options': '-vn'}
+    URL = song_queue[0]
+    del user[0]
+    del musictitle[0]
+    del song_queue[0]
+    vc = get(bot.voice_clients, guild=ctx.guild)
+    if not vc.is_playing():
+        vc.play(FFmpegPCMAudio(URL, **FFMPEG_OPTIONS), after=lambda e: play_next(ctx)) 
+        (client.loop.create_task(subtitle_song(ctx, URL)))
+
+def play_next(ctx):
+    if len(musicnow) - len(user) >= 2:
+        for i in range(len(musicnow) - len(user) - 1):
+            del musicnow[0]
+    YDL_OPTIONS = {'format': 'bestaudio', 'noplaylist':'True'}
+    FFMPEG_OPTIONS = {'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5', 'options': '-vn'}
+    if len(user) >= 1:
+        if not vc.is_playing():
+            del musicnow[0]
+            URL = song_queue[0]
+            del user[0]
+            del musictitle[0]
+            del song_queue[0]
+            vc.play(discord.FFmpegPCMAudio(URL,**FFMPEG_OPTIONS), after=lambda e: play_next(ctx))
+            (client.loop.create_task(subtitle_song(ctx, URL)))
+
+    else:
+        if not vc.is_playing():
+            client.loop.create_task(vc.disconnect())
+
+def again(ctx, url):
+    global number
+    YDL_OPTIONS = {'format': 'bestaudio', 'noplaylist':'True'}
+    FFMPEG_OPTIONS = {'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5', 'options': '-vn'}
+    if number:
+        with YoutubeDL(YDL_OPTIONS) as ydl:
+                info = ydl.extract_info(url, download=False)
+        URL = info['formats'][0]['url']
+        if not vc.is_playing():
+            vc.play(FFmpegPCMAudio(URL, **FFMPEG_OPTIONS), after = lambda e: again(ctx, url))
+
+def load_chrome_driver():
+
+    options = webdriver.ChromeOptions()
+
+    options.binary_location = os.getenv('GOOGLE_CHROME_BIN')
+
+    options.add_argument('--headless')
+    options.add_argument('--no-sandbox')
+
+    return webdriver.Chrome(executable_path = str(os.environ.get('CHROME_EXECUTABLE_PATH')), chrome_options=options)
 
 @bot.event
 async def on_ready():
@@ -235,23 +407,16 @@ async def on_message(message):
         embed.add_field(name="경고 지급 예정 입니다.", value="바보 하지 말아 주세요. 도배하면 경고 X 로 들어 갑니다.")
         await message.channel.send(embed=embed)
 
-    if message.content.startswith("!!경고"):
-        userid = message.content[5:].split(" ")[0] # userid를 가져옵니다 message.content[5:] -> !!경고 123 테스트 이렇게 입력했으면 5번쨰 인덱스 부터 전부 가져오고 띄워쓰기를 기준으로 잘라줍니다
-        username = bot.get_user(int(userid))# userid로 유저의 이름을 가져옵니다
-        reason = message.content[5:].split(" ")[1] # 띄워쓰기 기준으로 2번째 리스트를 가져옵니다
-        name = message.author.name # 이 명령어를 사용한 사람의 이름을 가져옵니다
-        server_name = value=message.author.display_name # 이 명령어를 사용한 사람의 서버닉네임을 가져옵니다.
-        id = message.author.id # 이 명령어를 사용한 사람의 아이디를 가져옵니다.
-        await message.channel.send("{0}관리자(id = {1} server_name = {2}) 가 {3}(id = {4}) 에게 경고를 주었습니다. 사유 : {5}".format(name, id, server_name, username, userid, reason))
-        await message.channel.send("```diff\n!{0}관리자(id = {1} server_name = {2})가\n-{3}(id = {4})에게 경고를 주었습니다.\n!사유 : {5}```".format(name, id, server_name, username, userid, reason))
-        # !!경고 123 테스트
-        # 012 3 45
-        # 5번째 인덱스부터가 123 테스트 입니다.
-        # 여기서 띄워쓰기 기준으로 잘라주면 123과 테스트 이렇게 2개의 리스트가 만들어 집니다.
-        # 123은 리스트의 0번째
-        # 테스트는 리스트의 1번째로
-        # split(" ")[0] = 123(ID를 가져오고)
-        # split(" ")[1] = 테스트(사유를 가져옵니다.)
+    if message.content.startswith('치처 추방'):
+            member = message.guild.get_member(int(message.content.split(" ")[1]))
+            await message.guild.kick(member, reason=' '.join(message.content.split(" ")[2:]))
+
+    if message.content.startswith("치처 밴"):
+        if message.author.guild_permissions.administrator: ##관리자만 사용 가능
+            member = message.guild.get_member(int(message.content.split(" ")[1]))
+            await message.guild.ban(member, reason=' '.join(message.content.split(" ")[2:]))
+
+ ##만약 await message.guild.ban 이라는거은 사용자가 메시지를 차단 합니다.
 
     if message.content.startswith("!퀴즈"):
         subject = message.content[4:]
@@ -794,6 +959,71 @@ async def on_message(message):
 
     if message.content.startswith("저쩔 생일"):
             await message.channel.send("어쩔티비")
+
+    if message.content.startswith('글리치'):
+        embed = discord.Embed(title="글리치 1%")
+        embed.add_field(name="잠시 기다리세여.", value="잠시 기다림")
+        await message.channel.send(embed=embed)
+        time.sleep(2)
+        embed = discord.Embed(title="글리치 4%")
+        embed.add_field(name="잠시 기다리세여.", value="잠시 기다림")
+        await message.channel.send(embed=embed)
+        time.sleep(2)
+        embed = discord.Embed(title="글리치 42%")
+        embed.add_field(name="잠시 기다리세여.", value="잠시 기다림")
+        await message.channel.send(embed=embed)
+        time.sleep(2)
+        embed = discord.Embed(title="글리치 55%")
+        embed.add_field(name="잠시 기다리세여.", value="잠시 기다림")
+        await message.channel.send(embed=embed)
+        time.sleep(2)
+        embed = discord.Embed(title="글리치 56%")
+        embed.add_field(name="잠시 기다리세여.", value="잠시 기다림")
+        await message.channel.send(embed=embed)
+        time.sleep(2)
+        embed = discord.Embed(title="글리치 77%")
+        embed.add_field(name="잠시 기다리세여.", value="잠시 기다림")
+        await message.channel.send(embed=embed)
+        time.sleep(2)
+        embed = discord.Embed(title="글리치 88%")
+        embed.add_field(name="잠시 기다리세여.", value="잠시 기다림")
+        await message.channel.send(embed=embed)
+        time.sleep(2)
+        embed = discord.Embed(title="글리치 99%")
+        embed.add_field(name="잠시 기다리세여.", value="잠시 기다림")
+        await message.channel.send(embed=embed)
+        time.sleep(2)
+        embed = discord.Embed(title="글리치 100%")
+        embed.add_field(name="잠시 기다리세여.", value="잠시 기다림")
+        await message.channel.send(embed=embed)
+        r = random.randint(1, 5)
+        
+        if r == 1:
+            embed = discord.Embed(title="글리치가 돼벌려다..", description="!!!", color=0xFF0000)
+            embed.add_field(name="글리치로 변해다.... 글리치 역활 받으수 있습니다.", value="내 글리치 ERROR 좀 봐줘래?", inline=False)
+            await message.channel.send(embed=embed)
+
+        if r == 2:
+            embed = discord.Embed(title="연구 실행", description="연구 시작!", color=0xFF0000)
+            embed.add_field(name="하지만.. 연구 할씨 글리치 바이러스 조심 하려고ㅋ", value="가즈아!!!", inline=False)
+            await message.channel.send(embed=embed)
+
+        if r == 3:
+            embed = discord.Embed(title="정지상태!", description="글리치가 오류 있습니다.", color=0xFF0000)
+            embed.add_field(name="정지", value="정지", inline=False)
+            await message.channel.send(embed=embed)
+
+        if r == 4:
+            embed = discord.Embed(title="연구", description="연구소 정보!", color=0xFF0000)
+            embed.add_field(name="연구 확인!", value=". ", inline=False)
+            embed.set_thumbnail(url="https://image.aladin.co.kr/product/29541/22/cover500/e932530889_1.jpg")
+            await message.channel.send(embed=embed)
+
+        if r == 5:
+            embed = discord.Embed(title="확인", description="확인 시작", color=0xFF0000)
+            embed.add_field(name="확인 중...", value="연구소 정보 확인!", inline=False)
+            await message.channel.send(embed=embed)
+
     await bot.process_commands(message)
 
 @bot.command(name="주사위2")
@@ -824,6 +1054,413 @@ async def 광산2(ctx):
 async def 반갑다(ctx):
     await ctx.send("안녕!")
 
+@bot.command()
+async def 검색(ctx,search=None):
+        if search==None:
+            searchem = discord.Embed(title='그래서 뭘 검색 하라고요? `?!검색 (원하는 컨탠츠)`',description='띄어쓰기 하면 한 문장만 검색 되요!',color=0xFF0F13)
+            return await ctx.send(embed = searchem)
+        embed = discord.Embed(title='**검색 결과**')
+        embed.add_field(name='네이버', value=f'[바로가기](https://m.search.naver.com/search.naver?sm=mtp_hty.top&where=m&query={search})')
+        embed.add_field(name='유튜브',value=f'[바로가기](https://m.youtube.com/results?sp=mAEA&search_query={search})')
+        embed.add_field(name='구글',value=f'[바로가기](https://www.google.com/search?q={search})')
+        await ctx.send(embed=embed)
 
 
-bot.run(token)
+@bot.command()
+async def 메뉴(ctx):
+    select = Select(
+        placeholder = "메뉴 선택 하기",
+        options = [
+        discord.SelectOption(label="프로필", description="자신 프로필를 알려 줘요!"),
+        discord.SelectOption(label="광산", description="광산 게임 해요!"),
+        discord.SelectOption(label="도옴말", description="도옴말 알려 줘요!")
+    ])
+
+    async def my_callback(interaction):
+        if select.values[0] == "프로필":
+            await interaction.response.send_message("프로필!!")
+            date = datetime.datetime.utcfromtimestamp(((int(ctx.author.id) >> 22) + 1420070400000) / 1000)
+            embed = discord.Embed(color=0x00D8FF)
+            embed.add_field(name="닉네임 : ", value=ctx.author, inline=False)
+            embed.add_field(name="서버닉네임 : ", value=ctx.author.display_name, inline=False)
+            embed.add_field(name="가입일 : ", value=str(date.year) + "년" + str(date.month) + "월" + str(date.day) + "일", inline=False)
+            embed.add_field(name="아이디 : ", value=ctx.author.id, inline=False)
+            await ctx.channel.send(embed=embed)
+        elif select.values[0] == "광산":
+            await interaction.response.send_message("광산!!")
+            minerals = ['레드 다이아몬드', '다이아몬드', '금', '은', '철', '석탄']
+            weights = [0.5, 3, 6, 15, 25, 1]
+            results = random.choices(minerals, weights=weights, k=10)  # 광물 10개를 가중치에 따라 뽑음
+            await ctx.send(', '.join(results) + ' 광물들을 획득하였습니다.')
+        elif select.values[0] == "도옴말":
+            await interaction.response.send_message("도옴말!!")
+            embed = discord.Embed(title="도옴말")
+            embed.add_field(name="치처 야", value="기본말 입니다.")
+            embed.add_field(name="치처 다른거 은?", value="안돼안돼")
+            embed.add_field(name="치처 봇 여기로 초대함?", value="알려 줘요!")
+            embed.add_field(name="치처 게임", value="게임 할 수 없다")
+            embed.add_field(name="치처 넌 바보니?", value="ㅋ.")
+            embed.add_field(name="치처 프로필", value="내정보 알려줘요!")
+            embed.add_field(name="치처 바보임?", value="ㅋㅋ.")
+            embed.add_field(name="!퀴즈 , !패스 , 정답", value="퀴즈 내요")
+            embed.add_field(name="치처 음악골라", value="유튜브 음악를 알려줘요!")
+            embed.add_field(name="!청소", value="관리자만 사용 가능 합니다.")
+            embed.add_field(name="!공지", value="관리자만 사용 가능 합니다.")
+            embed.add_field(name="!복권", value="복권 확인!")
+            embed.add_field(name="치처 광산", value="광산 합니다!")
+            embed.add_field(name="치처 확률", value="광산의 확률를 보여 줘요!")
+            embed.add_field(name="치처 도배모드 ON", value="도배 모드 활성화 됩니다!")
+            embed.add_field(name="치처 도배모드 OFF", value="도배 모드가 비활성화 됩니다!")
+            embed.add_field(name="치처 생존", value="생존 좀비 게임 할수 있다")
+            embed.add_field(name="치처 현재 시간", value="시각!")
+            embed.add_field(name="치처 강화", value="강화 합니다!")
+            embed.add_field(name="!가위바위보 보 , 가위 , 바위", value="강화 합니다!")
+            embed.add_field(name="!주사위2", value="주사위 2레벨 진화된 주사위 보여줘요!")
+            await ctx.channel.send(embed=embed)
+            
+    select.callback = my_callback
+    view = View()
+    view.add_item(select)
+
+    await ctx.send("메뉴 선택 해주세요!", view = view)
+
+@bot.command()
+async def 들어와(ctx):
+    try:
+        global vc
+        vc = await ctx.message.author.voice.channel.connect()
+    except:
+        try:
+            await vc.move_to(ctx.message.author.voice.channel)
+        except:
+            await ctx.send("채널에 유저가 접속해있지 않네요..")
+
+@bot.command()
+async def 나가(ctx):
+    try:
+        await vc.disconnect()
+    except:
+        await ctx.send("이미 그 채널에 속해있지 않아요.")
+
+@bot.command(name="URL재생하기")
+async def URL재생(ctx, *, url):
+
+    try:
+        global vc
+        vc = await ctx.message.author.voice.channel.connect()
+    except:
+        try:
+            await vc.move_to(ctx.message.author.voice.channel)
+        except:
+            await ctx.send("채널에 유저가 접속해있지 않네요..")
+
+    YDL_OPTIONS = {'format': 'bestaudio','noplaylist':'True'}
+    FFMPEG_OPTIONS = {'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5', 'options': '-vn'}
+
+    if not vc.is_playing():
+        with YoutubeDL(YDL_OPTIONS) as ydl:
+            info = ydl.extract_info(url, download=False)
+        URL = info['formats'][0]['url']
+        vc.play(FFmpegPCMAudio(URL, **FFMPEG_OPTIONS))
+        await subtitle_song(ctx, url)
+    else:
+        await ctx.send("노래가 이미 재생되고 있습니다!")
+
+@bot.command()
+async def 재생(ctx, *, msg):
+
+    try:
+        global vc
+        vc = await ctx.message.author.voice.channel.connect()
+    except:
+        try:
+            await vc.move_to(ctx.message.author.voice.channel)
+        except:
+            await ctx.send("채널에 유저가 접속해있지 않네요..")
+
+    if not vc.is_playing():
+        options = webdriver.ChromeOptions()
+        options.add_argument("headless")
+
+        global entireText
+        YDL_OPTIONS = {'format': 'bestaudio', 'noplaylist':'True'}
+        FFMPEG_OPTIONS = {'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5', 'options': '-vn'}
+            
+        chromedriver_dir = r"D:\Discord_Bot\chromedriver.exe"
+        driver = webdriver.Chrome(chromedriver_dir, options = options)
+        driver.get("https://www.youtube.com/results?search_query="+msg+"+lyrics")
+        source = driver.page_source
+        bs = bs4.BeautifulSoup(source, 'lxml')
+        entire = bs.find_all('a', {'id': 'video-title'})
+        entireNum = entire[0]
+        entireText = entireNum.text.strip()
+        musicurl = entireNum.get('href')
+        url = 'https://www.youtube.com'+musicurl 
+
+        driver.quit()
+
+        musicnow.insert(0, entireText)
+        with YoutubeDL(YDL_OPTIONS) as ydl:
+            info = ydl.extract_info(url, download=False)
+        URL = info['formats'][0]['url']
+        await ctx.send(embed = discord.Embed(title= "노래 재생", description = "현재 " + musicnow[0] + "을(를) 재생하고 있습니다.", color = 0x00ff00))
+        await subtitle_song(ctx, url)
+        vc.play(FFmpegPCMAudio(URL, **FFMPEG_OPTIONS), after=lambda e: play_next(ctx))
+    else:
+        await ctx.send("이미 노래가 재생 중이라 노래를 재생할 수 없어요!")
+
+@bot.command()
+async def 일시정지(ctx):
+    if vc.is_playing():
+        vc.pause()
+        await ctx.send(embed = discord.Embed(title= "일시정지", description = musicnow[0] + "을(를) 일시정지 했습니다.", color=0x00ff00))
+    else:
+        await ctx.send("지금 노래가 재생되지 않네요.")
+
+@bot.command()
+async def 다시재생(ctx):
+    try:
+        vc.resume()
+    except:
+         await ctx.send("지금 노래가 재생되지 않네요.")
+    else:
+         await ctx.send(embed = discord.Embed(title= "다시재생", description = musicnow[0]  + "을(를) 다시 재생했습니다.", color = 0x00ff00))
+
+@bot.command()
+async def 노래끄기(ctx):
+    if vc.is_playing():
+        vc.stop()
+        await ctx.send(embed = discord.Embed(title= "노래끄기", description = musicnow[0]  + "을(를) 종료했습니다.", color = 0x00ff00))
+    else:
+        await ctx.send("지금 노래가 재생되지 않네요.")
+
+@bot.command()
+async def 지금노래(ctx):
+    if not vc.is_playing():
+        await ctx.send("지금은 노래가 재생되지 않네요..")
+    else:
+        await ctx.send(embed = discord.Embed(title = "지금노래", description = "현재 " + musicnow[0] + "을(를) 재생하고 있습니다.", color = 0x00ff00))
+
+@bot.command()
+async def 대기열추가(ctx, *, msg):
+    user.append(msg)
+    result, URLTEST = title(msg)
+    song_queue.append(URLTEST)
+    await ctx.send(result + "를 재생목록에 추가했어요!")
+
+@bot.command()
+async def 대기열삭제(ctx, *, number):
+    try:
+        ex = len(musicnow) - len(user)
+        del user[int(number) - 1]
+        del musictitle[int(number) - 1]
+        del song_queue[int(number)-1]
+        del musicnow[int(number)-1+ex]
+            
+        await ctx.send("대기열이 정상적으로 삭제되었습니다.")
+    except:
+        if len(list) == 0:
+            await ctx.send("대기열에 노래가 없어 삭제할 수 없어요!")
+        else:
+            if len(list) < int(number):
+                await ctx.send("숫자의 범위가 목록개수를 벗어났습니다!")
+            else:
+                await ctx.send("숫자를 입력해주세요!")
+
+@bot.command()
+async def 목록(ctx):
+    if len(musictitle) == 0:
+        await ctx.send("아직 아무노래도 등록하지 않았어요.")
+    else:
+        global Text
+        Text = ""
+        for i in range(len(musictitle)):
+            Text = Text + "\n" + str(i + 1) + ". " + str(musictitle[i])
+            
+        await ctx.send(embed = discord.Embed(title= "노래목록", description = Text.strip(), color = 0x00ff00))
+
+@bot.command()
+async def 목록초기화(ctx):
+    try:
+        ex = len(musicnow) - len(user)
+        del user[:]
+        del musictitle[:]
+        del song_queue[:]
+        while True:
+            try:
+                del musicnow[ex]
+            except:
+                break
+        await ctx.send(embed = discord.Embed(title= "목록초기화", description = """목록이 정상적으로 초기화되었습니다. 이제 노래를 등록해볼까요?""", color = 0x00ff00))
+    except:
+        await ctx.send("아직 아무노래도 등록하지 않았어요.")
+
+@bot.command()
+async def 목록재생(ctx):
+
+    YDL_OPTIONS = {'format': 'bestaudio', 'noplaylist':'True'}
+    FFMPEG_OPTIONS = {'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5', 'options': '-vn'}
+    
+    if len(user) == 0:
+        await ctx.send("아직 아무노래도 등록하지 않았어요.")
+    else:
+        if len(musicnow) - len(user) >= 1:
+            for i in range(len(musicnow) - len(user)):
+                del musicnow[0]
+        if not vc.is_playing():
+            play(ctx)
+        else:
+            await ctx.send("노래가 이미 재생되고 있어요!")
+
+@bot.command()
+async def 즐겨찾기(ctx):
+    global Ftext
+    Ftext = ""
+    correct = 0
+    global Flist
+    for i in range(len(userF)):
+        if userF[i] == str(ctx.message.author.name): #userF에 유저정보가 있는지 확인
+            correct = 1 #있으면 넘김
+    if correct == 0:
+        userF.append(str(ctx.message.author.name)) #userF에다가 유저정보를 저장
+        userFlist.append([]) #유저 노래 정보 첫번째에 유저이름을 저장하는 리스트를 만듬.
+        userFlist[len(userFlist)-1].append(str(ctx.message.author.name))
+        
+    for i in range(len(userFlist)):
+        if userFlist[i][0] == str(ctx.message.author.name):
+            if len(userFlist[i]) >= 2: # 노래가 있다면
+                for j in range(1, len(userFlist[i])):
+                    Ftext = Ftext + "\n" + str(j) + ". " + str(userFlist[i][j])
+                titlename = str(ctx.message.author.name) + "님의 즐겨찾기"
+                embed = discord.Embed(title = titlename, description = Ftext.strip(), color = 0x00ff00)
+                embed.add_field(name = "목록에 추가\U0001F4E5", value = "즐겨찾기에 모든 곡들을 목록에 추가합니다.", inline = False)
+                embed.add_field(name = "플레이리스트로 추가\U0001F4DD", value = "즐겨찾기에 모든 곡들을 새로운 플레이리스트로 저장합니다.", inline = False)
+                Flist = await ctx.send(embed = embed)
+                await Flist.add_reaction("\U0001F4E5")
+                await Flist.add_reaction("\U0001F4DD")
+            else:
+                await ctx.send("아직 등록하신 즐겨찾기가 없어요.")
+
+
+
+@bot.command()
+async def 즐겨찾기추가(ctx, *, msg):
+    correct = 0
+    for i in range(len(userF)):
+        if userF[i] == str(ctx.message.author.name): #userF에 유저정보가 있는지 확인
+            correct = 1 #있으면 넘김
+    if correct == 0:
+        userF.append(str(ctx.message.author.name)) #userF에다가 유저정보를 저장
+        userFlist.append([]) #유저 노래 정보 첫번째에 유저이름을 저장하는 리스트를 만듦.
+        userFlist[len(userFlist)-1].append(str(ctx.message.author.name))
+
+    for i in range(len(userFlist)):
+        if userFlist[i][0] == str(ctx.message.author.name):
+            
+            options = webdriver.ChromeOptions()
+            options.add_argument("headless")
+
+            chromedriver_dir = r"D:\Discord_Bot\chromedriver.exe"
+            driver = webdriver.Chrome(chromedriver_dir, options = options)
+            driver.get("https://www.youtube.com/results?search_query="+msg+"+lyrics")
+            source = driver.page_source
+            bs = bs4.BeautifulSoup(source, 'lxml')
+            entire = bs.find_all('a', {'id': 'video-title'})
+            entireNum = entire[0]
+            music = entireNum.text.strip()
+
+            driver.quit()
+
+            userFlist[i].append(music)
+            await ctx.send(music + "(이)가 정상적으로 등록되었어요!")
+
+
+
+@bot.command()
+async def 즐겨찾기삭제(ctx, *, number):
+    correct = 0
+    for i in range(len(userF)):
+        if userF[i] == str(ctx.message.author.name): #userF에 유저정보가 있는지 확인
+            correct = 1 #있으면 넘김
+    if correct == 0:
+        userF.append(str(ctx.message.author.name)) #userF에다가 유저정보를 저장
+        userFlist.append([]) #유저 노래 정보 첫번째에 유저이름을 저장하는 리스트를 만듦.
+        userFlist[len(userFlist)-1].append(str(ctx.message.author.name))
+
+    for i in range(len(userFlist)):
+        if userFlist[i][0] == str(ctx.message.author.name):
+            if len(userFlist[i]) >= 2: # 노래가 있다면
+                try:
+                    del userFlist[i][int(number)]
+                    await ctx.send("정상적으로 삭제되었습니다.")
+                except:
+                     await ctx.send("입력한 숫자가 잘못되었거나 즐겨찾기의 범위를 초과하였습니다.")
+            else:
+                await ctx.send("즐겨찾기에 노래가 없어서 지울 수 없어요!")
+
+@bot.event
+async def on_reaction_add(reaction, users, ctx):
+    if users.bot == 1:
+        pass
+    else:
+        try:
+            await Flist.delete()
+        except:
+            pass
+        else:
+            if str(reaction.emoji) == '\U0001F4E5':
+                await reaction.message.channel.send("잠시만 기다려주세요. (즐겨찾기 갯수가 많으면 지연될 수 있습니다.)")
+                print(users.name)
+                for i in range(len(userFlist)):
+                    if userFlist[i][0] == str(users.name):
+                        for j in range(1, len(userFlist[i])):
+                            try:
+                                driver.close()
+                            except:
+                                print("NOT CLOSED")
+
+                            user.append(userFlist[i][j])
+                            result, URLTEST = title(userFlist[i][j])
+                            song_queue.append(URLTEST)
+                            await reaction.message.channel.send(userFlist[i][j] + "를 재생목록에 추가했어요!")
+            elif str(reaction.emoji) == '\U0001F4DD':
+                await reaction.message.channel.send("플레이리스트가 나오면 생길 기능이랍니다. 추후에 올릴 영상을 기다려주세요!")
+
+@bot.command()
+async def 반복재생(ctx, *, msg):
+      
+    try:
+        global vc
+        vc = await ctx.message.author.voice.channel.connect()   
+    except:
+        try:
+            await vc.move_to(ctx.message.author.voice.channel)
+        except:
+            pass
+    
+    global entireText
+    global number
+    number = 1
+    YDL_OPTIONS = {'format': 'bestaudio', 'noplaylist':'True'}
+    FFMPEG_OPTIONS = {'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5', 'options': '-vn'}
+    
+    if len(musicnow) - len(user) >= 1:
+        for i in range(len(musicnow) - len(user)):
+            del musicnow[0]
+            
+    driver = load_chrome_driver()
+    driver.get("https://www.youtube.com/results?search_query="+msg+"+lyrics")
+    source = driver.page_source
+    bs = bs4.BeautifulSoup(source, 'lxml')
+    entire = bs.find_all('a', {'id': 'video-title'})
+    entireNum = entire[0]
+    entireText = entireNum.text.strip()
+    musicnow.insert(0, entireText)
+    test1 = entireNum.get('href')
+    url = 'https://www.youtube.com'+test1
+    await ctx.send(embed = discord.Embed(title= "반복재생", description = "현재 " + musicnow[0] + "을(를) 반복재생하고 있습니다.", color = 0x00ff00))
+    again(ctx, url)
+
+  
+keep_alive()
+bot.run("MTAxODc2MjYzMjMxMzk3NDc5NA.G_-XoV.9s89SjtCKVI4vwueWmjW0MEF-vw1oDfyKJHKmQ")
